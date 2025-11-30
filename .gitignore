@@ -58,3 +58,11 @@ output
 cc3m
 checkpoints
 ckpts*
+
+
+setup/set_path.sh 
+
+/r2d_reasoner/data/*
+
+r2d_reasoner/data/*
+setup/set_path.sh
