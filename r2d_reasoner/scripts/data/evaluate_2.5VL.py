@@ -1,13 +1,22 @@
+import sys
+import os
+
+# Add r2d_reasoner/ to path for imports to work when running as script
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 import torch 
 import json
 import gc
+import random
+import numpy as np
+from PIL import Image
+from datasets import load_dataset
 from model.model_loader import load_gen_model_and_processor, load_mini_gen_model_and_processor, load_eval_model_and_tokenizer, load_eval_vl_model_and_processor, load_stf_gen_model_and_processor
 from utils import generate_text_from_sample, extract_correct_reasoning, extract_prompt, extract_img, extract_correct_answer, clear_memory
 from configs.config import TrainingConfig
-import numpy as np
-from PIL import Image
-import os
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+from scripts.data.data_fortmat import format_data
 
 class Evaluate_Model(): 
     def __init__(self, model, processor, max:int, model_name:str, cj: str, ij: str):
@@ -60,9 +69,9 @@ class Evaluate_Model():
             self.correct.append(sample)
 
     def dump_info(self): 
-        with open(f"output/inference/{self.incorrect_json}", 'w') as file:
+        with open(f"r2d_reasoner/outputs/Qwen2.5-VL-r2d/Inference{self.incorrect_json}", 'w') as file:
             json.dump(self.incorrect, file, indent=4)
-        with open(f"output/inference/{self.correct_json}", "w") as file: 
+        with open(f"r2d_reasoner/outputs/Qwen2.5-VL-r2d/Inference{self.correct_json}", "w") as file: 
             json.dump(self.correct, file, indent=4)
 
     def create_error_log(idx, error_type, e_msg): 
@@ -90,8 +99,14 @@ def main():
     clear_memory()
     config = TrainingConfig()
 
-    with open("output/test/test_data2.json", 'r') as f:
-        file = json.load(f)
+    print("Loading dataset: Share4oReasoning/sft_data")
+    ds = load_dataset("Share4oReasoning/sft_data")
+    train_data = ds['train']
+    
+    random.seed(42)
+    num_samples = min(10000, len(train_data))
+    sample_indices = random.sample(range(len(train_data)), num_samples)
+    print(f"Randomly sampled {num_samples} samples for evaluation")
 
     sft_model, sft_processor = load_stf_gen_model_and_processor(config, sharding=True)
     base_model, base_processor = load_gen_model_and_processor(config, sharding=True)
@@ -101,18 +116,21 @@ def main():
     sft_evaluator = Evaluate_Model(sft_model, sft_processor, 1024, "Qwen2.5-VL-3B-Sft", "r1_correct.json", "r1_incorrect.json")
     base_evaluator = Evaluate_Model(base_model, base_processor, 1024, "Qwen2.5-Vl-3B-Instruct", "base_correct.json", "base_incorrect.json")
 
-    for i in range(len(file)):
-        sample = file[i]
+    for i, idx in enumerate(sample_indices):
+        # Get raw sample from HuggingFace dataset and format it
+        raw_sample = train_data[idx]
+        sample = format_data(raw_sample, config.image_dir)
+        
         sft_evaluator.process_sample(sample, i)
         base_evaluator.process_sample(sample, i)
 
-        if (i%20 ==0): 
+        if (i % 20 == 0): 
             sft_evaluator.dump_info()
             base_evaluator.dump_info()
 
-            print(f"completed {i}th test data sample {len(file)-i} remaining \nr1 correct: {len(sft_evaluator.correct)} \nbase correct: {len(base_evaluator.correct)} \n")
+            print(f"completed {i}th test data sample {num_samples - i} remaining \nr1 correct: {len(sft_evaluator.correct)} \nbase correct: {len(base_evaluator.correct)} \n")
 
-    print(f"finished evaluating test_data2")
+    print(f"finished evaluating {num_samples} samples from Share4oReasoning/sft_data")
 
 if __name__ == "__main__":
     main()

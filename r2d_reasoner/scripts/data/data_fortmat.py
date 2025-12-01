@@ -27,7 +27,7 @@ def format_data(sample, image_dir):
         }
     ]
 
-def format_incorrect_for_training(self, item: Dict, model_response: str) -> Dict:
+def format_incorrect_for_training(self, item, model_response: str):
         """
         Format an incorrect sample in conversation format for training.
         
@@ -63,7 +63,7 @@ def format_incorrect_for_training(self, item: Dict, model_response: str) -> Dict
         }
 
 
-def format_messages(image: Any, question: str) -> List[Dict]:
+def format_messages(image, question: str):
     """
     Creates the chat message format for Qwen3-VL.
     The processor's qwen-vl-utils supports paths, URLs, base64, and PIL.Image objects.
