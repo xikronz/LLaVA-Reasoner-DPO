@@ -66,3 +66,6 @@ setup/set_path.sh
 
 r2d_reasoner/data/*
 setup/set_path.sh
+
+
+r2d_reasoner/outputs/*
