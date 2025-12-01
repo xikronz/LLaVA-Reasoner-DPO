@@ -33,3 +33,17 @@ class TrainingConfig:
     max_grad_norm = 0.3
     warmup_ratio = 0.03
 
+@dataclass
+class EvalConfig:
+    """Configuration for evaluation."""
+    model_id: str = "Qwen/Qwen3-VL-4B-Thinking"
+    image_path: str = "r2d_reasoner/data/images"  # Base path for images
+    dataset_name: str = "Share4oReasoning/sft_data"
+    num_samples: int = 10000
+    batch_size: int = 1  # VLMs typically need batch_size=1 due to variable image sizes
+    max_new_tokens: int = 1024
+    max_image_size: int = 1024  # Max dimension for image resizing
+    output_dir: str = "output/evaluation"
+    inference_output_dir: str = "r2d_reasoner/data/inference"  # Directory for incorrect responses
+    seed: int = 42
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
