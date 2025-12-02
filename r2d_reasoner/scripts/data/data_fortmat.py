@@ -6,7 +6,7 @@ from PIL import Image
 from torch.utils.data import Dataset, random_split
 import numpy as np
 
-SYSTEM_MESSAGE ="You are a Vision Language Model specialized in interpreting and analyzing visual information from image data. Given an image, provide a detailed explanation based on visual evidence present in the image. Reference specific, visible elements (e.g., signs, people, objects, colors, or positions) to support your reasoning and number your thoughts sequentially. Conclude with the final answer, clearly wrapped in the format: \n\n### Answer: {your answer here}"
+SYSTEM_MESSAGE ="You are a Vision Language Model specialized in interpreting and analyzing visual information from image data. Given an image, and a question, provide a detailed explanation based on visual evidence present in the image. Reference specific, visible elements (e.g., signs, people, objects, colors, or positions) to support your reasoning and number your thoughts sequentially. Conclude with the final answer, clearly wrapped in the format: \n\n### Answer: {your answer here}"
 RECTIFIED_INSTRUCT = "You are a Vision Language Model specialized in to help students by identifying and correcting mistakes in their solutions. Given a problem, the student's solution, the correct answer key, and the final correct answer, your task is to find the first mistake in the student's response, starting from the point where their solution deviates from the correct approach. Then, provide a step-by-step correction as if you were the student to go from the mistake to the correct answer while referencing the answer key. Make sure you output in this format: \n\n### Mistake: [the student’s first mistake here], \n\n Correction: Wait, actually [Why was the mistake wrong? How can the student correct their mistake and reach the correct answer?]"
 
 # formats the data for initial fine tuning 
@@ -27,7 +27,7 @@ def format_data(sample, image_dir):
         }
     ]
 
-def format_incorrect_for_training(self, item, model_response: str):
+def format_incorrect_for_training(item, model_response: str):
         """
         Format an incorrect sample in conversation format for training.
         
@@ -39,9 +39,11 @@ def format_incorrect_for_training(self, item, model_response: str):
             Dictionary with conversation format, image path, question, and correct answer
         """
         return {
-            "image_path": item['image_path'],
+            "id": item['id'],
+            "image": item['image_path'],
             "question": item['question'],
-            "correct_answer": item['ground_truth'],  # Full GPT response with reasoning
+            "gpt_response": item['ground_truth'],  # Full GPT response with reasoning
+            "answer": item['answer'], 
             "conversations": [
                 {
                     "from": "system",
@@ -55,10 +57,6 @@ def format_incorrect_for_training(self, item, model_response: str):
                     "from": "model",
                     "value": model_response  # Full model response
                 },
-                {
-                    "from": "gpt",
-                    "value": item['ground_truth']  # Full correct answer from GPT
-                }
             ]
         }
 

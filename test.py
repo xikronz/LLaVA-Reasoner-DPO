@@ -1,24 +1,6 @@
-# Load model directly
-from transformers import AutoProcessor, AutoModelForVision2Seq
+from datasets import load_dataset
 
-processor = AutoProcessor.from_pretrained("Qwen/Qwen3-VL-4B-Thinking")
-model = AutoModelForVision2Seq.from_pretrained("Qwen/Qwen3-VL-4B-Thinking")
-messages = [
-    {
-        "role": "user",
-        "content": [
-            {"type": "image", "url": "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/p-blog/candy.JPG"},
-            {"type": "text", "text": "What animal is on the candy?"}
-        ]
-    },
-]
-inputs = processor.apply_chat_template(
-	messages,
-	add_generation_prompt=True,
-	tokenize=True,
-	return_dict=True,
-	return_tensors="pt",
-).to(model.device)
+ds = load_dataset("Share4oReasoning/dpo_data")
 
-outputs = model.generate(**inputs, max_new_tokens=40)
-print(processor.decode(outputs[0][inputs["input_ids"].shape[-1]:]))
+print(ds['train'][0])
+print(ds['train'][0].keys())

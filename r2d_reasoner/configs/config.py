@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from trl import SFTConfig
+import torch
 
 @dataclass
 class TrainingConfig: 
@@ -9,10 +10,10 @@ class TrainingConfig:
     eval_model_id = "Qwen/Qwen2.5-32B-Instruct"
     
     json_path = "data/stf_data.json"
-    image_dir = "data"
-    output_dir = "./output/Qwen2.5-VL-3B-Instruct/newest"
+    image_dir = "data/images"
+    output_dir = "./outputs/Qwen2.5-VL-3B-Instruct/newest"
     test_dir = "./output"
-    adapter_path = "output/Qwen2.5-VL-3B-Instruct/recent"
+    adapter_path = "outputs/Qwen2.5-VL-3B-Instruct/recent"
 
     wandb_project = "R2Dtuning"
     wandb_run_name = "lr tuning 2"
@@ -37,13 +38,27 @@ class TrainingConfig:
 class EvalConfig:
     """Configuration for evaluation."""
     model_id: str = "Qwen/Qwen3-VL-4B-Thinking"
-    image_path: str = "r2d_reasoner/data/images"  # Base path for images
-    dataset_name: str = "Share4oReasoning/sft_data"
+    image_path: str = "data/images"  
+    dataset_name: str = "Share4oReasoning/dpo_data"
     num_samples: int = 10000
-    batch_size: int = 1  # VLMs typically need batch_size=1 due to variable image sizes
+    batch_size: int = 1 
     max_new_tokens: int = 1024
-    max_image_size: int = 1024  # Max dimension for image resizing
-    output_dir: str = "output/evaluation"
-    inference_output_dir: str = "r2d_reasoner/data/inference"  # Directory for incorrect responses
+    max_image_size: int = 1024  
+    output_dir: str = "outputs/Qwen3-VL-4B-Thinking/results"
+    inference_output_dir: str = "outputs/Qwen3-VL-4B-Thinking/Inference" 
+    seed: int = 42
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+
+@dataclass
+class EvalDPOConfig:
+    model_id: str = "Qwen/Qwen3-VL-4B-Thinking"
+    image_path: str = "data/images"  
+    dataset_name: str = "Share4oReasoning/dpo_data"
+    num_samples: int = 10000
+    batch_size: int = 1 
+    max_new_tokens: int = 1024
+    max_image_size: int = 1024 
+    output_dir: str = "outputs/Qwen3-VL-4B-Thinking/results" #stats 
+    inference_output_dir: str = "outputs/Qwen3-VL-4B-Thinking/Inference"  #incorrect
     seed: int = 42
     device: str = "cuda" if torch.cuda.is_available() else "cpu"

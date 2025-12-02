@@ -1,12 +1,8 @@
-"""
-Evaluation script for Qwen3-VL-4B-Thinking on Share4oReasoning dataset.
-Evaluates model on 10,000 randomly sampled rows.
-"""
-
 import torch
 import json
 import gc
 import os
+import sys
 import random
 import regex as re
 from PIL import Image
@@ -17,13 +13,13 @@ from datasets import load_dataset
 from transformers import AutoProcessor, AutoModelForVision2Seq
 from torch.utils.data import DataLoader, Dataset
 from data_fortmat import format_messages, format_incorrect_for_training
-from ..configs.config import EvalConfig
-from ..utils import clear_memory
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+from utils import clear_memory
+from configs.config import EvalConfig, EvalDPOConfig
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-
 SYSTEM_MESSAGE = "You are a Vision Language Model specialized in interpreting and analyzing visual information from image data. Given an image, provide a detailed explanation based on visual evidence present in the image. Reference specific, visible elements (e.g., signs, people, objects, colors, or positions) to support your reasoning and number your thoughts sequentially. Conclude with the final answer, clearly wrapped in the format: \n\n### Answer: {your answer here}"
-
 
 def extract_answer(text: str) -> Optional[str]:
     """Extract the answer from model output or ground truth."""
@@ -82,14 +78,17 @@ class Share4oReasoningDataset(Dataset):
         
         full_image_path = os.path.join(self.image_path, sample['image'])
         
-        question = sample['conversations'][0]['value']
-        ground_truth = sample['conversations'][1]['value']
+        question = sample['question']
+        ground_truth = sample['chosen']
+        answer = sample['chosen']
+        
         
         return {
             'id': sample.get('id', idx),
             'image_path': full_image_path,
             'question': question,
             'ground_truth': ground_truth,
+            'answer': answer, 
             'sample': sample
         }
 
@@ -228,8 +227,7 @@ class ModelEvaluator:
             )
             
             model_response = self.generate_response(inputs)
-            
-            ground_truth_answer = extract_answer(item['ground_truth'])
+            ground_truth_answer = item['answer']
             model_answer = extract_answer(model_response)
             
             is_correct = (
@@ -242,7 +240,7 @@ class ModelEvaluator:
                 'question': item['question'],
                 'ground_truth': item['ground_truth'],
                 'model_response': model_response,
-                'ground_truth_answer': ground_truth_answer,
+                'ground_truth_answer':ground_truth_answer,
                 'model_answer': model_answer,
                 'correct': is_correct
             }
@@ -282,7 +280,7 @@ class ModelEvaluator:
                     )
                     
                     model_response = self.generate_response(inputs)
-                    ground_truth_answer = extract_answer(item['ground_truth'])
+                    ground_truth_answer = item['answer']
                     model_answer = extract_answer(model_response)
                     
                     is_correct = (
@@ -388,7 +386,7 @@ class ModelEvaluator:
 def main():
     """Main evaluation function."""
 
-    config = EvalConfig()
+    config = EvalDPOConfig()
     clear_memory()
     
     print(f"Loading dataset: {config.dataset_name}")
@@ -417,6 +415,8 @@ def main():
     print(f"\nStarting evaluation on {len(eval_dataset)} samples...")
     
     for idx in tqdm(range(len(eval_dataset)), desc="Evaluating"):
+        if idx <3996:
+            continue
         item = eval_dataset[idx]
         evaluator.evaluate_sample(item, idx)
         

@@ -41,7 +41,7 @@ def generate_text_from_sample(model, processor, sample, max_len, max_new_tokens=
         return_tensors="pt",
     ).to(device)
 
-    generated_ids = model.generate(**model_inputs, max_new_tokens=max_new_tokens)
+    generated_ids = model.generate(**model_inputs, max_new_tokens=max_new_tokens, do_sample = False)
 
     trimmed_generated_ids = [out_ids[len(in_ids):] for in_ids, out_ids in zip(model_inputs.input_ids, generated_ids)]
 
