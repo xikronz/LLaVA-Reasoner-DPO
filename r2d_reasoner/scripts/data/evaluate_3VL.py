@@ -251,7 +251,7 @@ class ModelEvaluator:
             else:
                 self.incorrect.append(result)
                 self.incorrect_conversations.append(
-                    self.format_incorrect_for_training(item, model_response)
+                    format_incorrect_for_training(item, model_response)
                 )
             
             return is_correct
@@ -305,7 +305,7 @@ class ModelEvaluator:
                     else:
                         self.incorrect.append(result)
                         self.incorrect_conversations.append(
-                            self.format_incorrect_for_training(item, model_response)
+                            format_incorrect_for_training(item, model_response)
                         )
                     
                     return is_correct
@@ -385,23 +385,32 @@ class ModelEvaluator:
                   f"Errors: {len(self.errors)}, Accuracy: {accuracy:.2f}%")
 
 
-def main():
-    """Main evaluation function."""
-
+def main(start_idx: int = 0, end_idx: int = 10000, gpu_id: int = 0):
+    """Main evaluation function.
+    
+    Args:
+        start_idx: Starting index for evaluation range
+        end_idx: Ending index for evaluation range
+        gpu_id: GPU ID to use for this process
+    """
+    # Set GPU for this process
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    
     config = EvalDPOConfig()
     clear_memory()
     
-    print(f"Loading dataset: {config.dataset_name}")
+    print(f"[GPU {gpu_id}] Loading dataset: {config.dataset_name}")
     ds = load_dataset(config.dataset_name)
     
     train_data = ds['train']
-    print(f"Total samples in training set: {len(train_data)}")
+    print(f"[GPU {gpu_id}] Total samples in training set: {len(train_data)}")
     
     random.seed(config.seed)
     total_samples = len(train_data)
     sample_indices = random.sample(range(total_samples), min(config.num_samples, total_samples))
     
-    print(f"Randomly sampled {len(sample_indices)} samples for evaluation")
+    print(f"[GPU {gpu_id}] Randomly sampled {len(sample_indices)} samples for evaluation")
+    print(f"[GPU {gpu_id}] Processing range: {start_idx} to {end_idx}")
     
     sampled_data = [train_data[i] for i in sample_indices]
     
@@ -414,31 +423,36 @@ def main():
     evaluator = ModelEvaluator(config)
     evaluator.load_model()
     
-    print(f"\nStarting evaluation on {len(eval_dataset)} samples...")
+    print(f"\n[GPU {gpu_id}] Starting evaluation on samples {start_idx} to {end_idx}...")
     
-    for idx in tqdm(range(len(eval_dataset)), desc="Evaluating"):
-        if idx <3996:
-            continue
+    for idx in tqdm(range(start_idx, min(end_idx, len(eval_dataset))), desc=f"GPU {gpu_id} Evaluating"):
         item = eval_dataset[idx]
         evaluator.evaluate_sample(item, idx)
         
-        if (idx + 1) % 100 == 0:
+        if (idx + 1) % 500 == 0:
             evaluator.print_stats()
-            evaluator.save_results(prefix=f"checkpoint_{idx+1}")
+            evaluator.save_results(prefix=f"gpu{gpu_id}_checkpoint_{idx+1}")
             clear_memory()
     
-    evaluator.save_results(prefix="final")
+    evaluator.save_results(prefix=f"gpu{gpu_id}_final_{start_idx}_{end_idx}")
     
     print("\n" + "="*50)
-    print("FINAL EVALUATION RESULTS")
+    print(f"[GPU {gpu_id}] FINAL EVALUATION RESULTS")
     print("="*50)
     evaluator.print_stats()
     
     total = len(evaluator.correct) + len(evaluator.incorrect)
     if total > 0:
-        print(f"\nFinal Accuracy: {len(evaluator.correct) / total * 100:.2f}%")
-    print(f"Total Errors: {len(evaluator.errors)}")
+        print(f"\n[GPU {gpu_id}] Final Accuracy: {len(evaluator.correct) / total * 100:.2f}%")
+    print(f"[GPU {gpu_id}] Total Errors: {len(evaluator.errors)}")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description="Evaluate VLM on Share4oReasoning dataset")
+    parser.add_argument("--start", type=int, default=0, help="Start index")
+    parser.add_argument("--end", type=int, default=10000, help="End index")
+    parser.add_argument("--gpu", type=int, default=0, help="GPU ID to use")
+    args = parser.parse_args()
+    
+    main(start_idx=args.start, end_idx=args.end, gpu_id=args.gpu)
