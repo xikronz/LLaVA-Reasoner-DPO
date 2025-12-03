@@ -22,7 +22,6 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 SYSTEM_MESSAGE = "You are a Vision Language Model specialized in interpreting and analyzing visual information from image data. Given an image, provide a detailed explanation based on visual evidence present in the image. Reference specific, visible elements (e.g., signs, people, objects, colors, or positions) to support your reasoning and number your thoughts sequentially. Conclude with the final answer, clearly wrapped in the format: \n\n### Answer: {your answer here}"
 
 def extract_answer(text: str) -> Optional[str]:
-    """Extract the answer from model output or ground truth."""
     if text is None:
         return None
     
@@ -39,14 +38,12 @@ def extract_answer(text: str) -> Optional[str]:
     return None
 
 def safe_contains(text: str, substring: str) -> bool:
-    """Safely check if substring is in text, handling None values."""
     if text is None or substring is None:
         return False
     return substring.lower() in text.lower()
 
 
 def resize_image(image: Image.Image, max_size: int) -> Image.Image:
-    """Resize image if it exceeds max_size while maintaining aspect ratio."""
     width, height = image.size
     
     if width <= max_size and height <= max_size:
@@ -62,9 +59,7 @@ def resize_image(image: Image.Image, max_size: int) -> Image.Image:
     return image.resize((new_width, new_height), Image.LANCZOS)
 
 
-class Share4oReasoningDataset(Dataset):
-    """Custom Dataset for Share4oReasoning evaluation."""
-    
+class Share4oReasoningDataset(Dataset):    
     def __init__(self, samples: List[Dict], image_path: str, max_image_size: int = 1024):
         self.samples = samples
         self.image_path = image_path
@@ -108,7 +103,6 @@ def collate_fn(batch: List[Dict], processor: AutoProcessor) -> Dict[str, Any]:
     metadata = []
     
     for item in batch:
-        #format messages - processor will load image from path automatically
         messages = format_messages(item['image_path'], item['question'])
         
         all_messages.append(messages)
@@ -122,8 +116,6 @@ def collate_fn(batch: List[Dict], processor: AutoProcessor) -> Dict[str, Any]:
     if not all_messages:
         return None
     
-    #process with Qwen3-VL processor
-    #processor automatically loads images from paths in messages
     processed_inputs = []
     for messages in all_messages:
         text_input = processor.apply_chat_template(
@@ -152,8 +144,6 @@ def collate_fn(batch: List[Dict], processor: AutoProcessor) -> Dict[str, Any]:
 
 
 class ModelEvaluator:
-    """Evaluator class for VLM models on Share4oReasoning dataset."""
-    
     def __init__(self, config: EvalConfig):
         self.config = config
         self.correct = []
@@ -163,8 +153,26 @@ class ModelEvaluator:
         self.model = None
         self.processor = None
         
+        self.benchmark_stats = {}
+        
         os.makedirs(config.output_dir, exist_ok=True)
         os.makedirs(config.inference_output_dir, exist_ok=True)
+    
+    def extract_benchmark(self, image_path: str) -> str:
+        #aokvqa/33DPuC3HsYxY85pCTfcoxv.jpg" -> "aokvqa"
+        parts = image_path.split('/')
+        if len(parts) > 0:
+            return parts[0]
+        return "unknown"
+    
+    def update_benchmark_stats(self, benchmark: str, is_correct: bool):
+        """Update statistics for a specific benchmark."""
+        if benchmark not in self.benchmark_stats:
+            self.benchmark_stats[benchmark] = {'correct': 0, 'total': 0}
+        
+        self.benchmark_stats[benchmark]['total'] += 1
+        if is_correct:
+            self.benchmark_stats[benchmark]['correct'] += 1
     
     def load_model(self):
         """Load the model and processor."""
@@ -235,9 +243,14 @@ class ModelEvaluator:
                 safe_contains(ground_truth_answer, model_answer)
             )
             
+            #extract benchmark from image path
+            benchmark = self.extract_benchmark(item['image_path'])
+            self.update_benchmark_stats(benchmark, is_correct)
+            
             result = {
                 'id': item['id'],
                 'image_path': item['image_path'],
+                'benchmark': benchmark,
                 'question': item['question'],
                 'ground_truth': item['ground_truth'],
                 'model_response': model_response,
@@ -289,9 +302,13 @@ class ModelEvaluator:
                         safe_contains(ground_truth_answer, model_answer)
                     )
                     
+                    benchmark = self.extract_benchmark(item['image_path'])
+                    self.update_benchmark_stats(benchmark, is_correct)
+                    
                     result = {
                         'id': item['id'],
                         'image_path': item['image_path'],
+                        'benchmark': benchmark,
                         'question': item['question'],
                         'ground_truth': item['ground_truth'],
                         'model_response': model_response,
@@ -345,12 +362,27 @@ class ModelEvaluator:
         with open(os.path.join(self.config.output_dir, f"{timestamp}_errors.json"), 'w') as f:
             json.dump(self.errors, f, indent=2)
         
+        benchmark_summary = {}
+        for benchmark, stats in self.benchmark_stats.items():
+            accuracy = stats['correct'] / stats['total'] if stats['total'] > 0 else 0
+            benchmark_summary[benchmark] = {
+                'correct': stats['correct'],
+                'total': stats['total'],
+                'accuracy': accuracy
+            }
+        
+        sorted_benchmarks = sorted(
+            benchmark_summary.items(), 
+            key=lambda x: x[1]['accuracy']
+        )
+        
         summary = {
             'total_samples': len(self.correct) + len(self.incorrect) + len(self.errors),
             'correct': len(self.correct),
             'incorrect': len(self.incorrect),
             'errors': len(self.errors),
-            'accuracy': len(self.correct) / (len(self.correct) + len(self.incorrect)) if (len(self.correct) + len(self.incorrect)) > 0 else 0
+            'accuracy': len(self.correct) / (len(self.correct) + len(self.incorrect)) if (len(self.correct) + len(self.incorrect)) > 0 else 0,
+            'benchmark_stats': dict(sorted_benchmarks) 
         }
         
         with open(os.path.join(self.config.output_dir, f"{timestamp}_summary.json"), 'w') as f:
@@ -361,10 +393,6 @@ class ModelEvaluator:
         print(f"Results saved to {self.config.output_dir}")
     
     def save_incorrect_conversations(self, prefix: str = ""):
-        """
-        Save incorrect samples in conversation format to the inference directory.
-        This format is suitable for further training/fine-tuning.
-        """
         timestamp = prefix if prefix else "eval"
         output_path = os.path.join(
             self.config.inference_output_dir, 
@@ -383,17 +411,30 @@ class ModelEvaluator:
             accuracy = len(self.correct) / total * 100
             print(f"Correct: {len(self.correct)}, Incorrect: {len(self.incorrect)}, "
                   f"Errors: {len(self.errors)}, Accuracy: {accuracy:.2f}%")
+    
+    def print_benchmark_stats(self):
+        """Print per-benchmark statistics, sorted by accuracy (lowest first)."""
+        if not self.benchmark_stats:
+            print("No benchmark statistics available yet.")
+            return
+        
+        print("\n" + "="*60)
+        print("PER-BENCHMARK STATISTICS (sorted by accuracy, lowest first)")
+        print("="*60)
+        
+        #sort by accuracy
+        sorted_stats = sorted(
+            self.benchmark_stats.items(),
+            key=lambda x: x[1]['correct'] / x[1]['total'] if x[1]['total'] > 0 else 0
+        )
+        
+        for benchmark, stats in sorted_stats:
+            accuracy = stats['correct'] / stats['total'] * 100 if stats['total'] > 0 else 0
+            print(f"  {benchmark:30s}: {stats['correct']:4d}/{stats['total']:4d} ({accuracy:5.2f}%)")
 
 
 def main(start_idx: int = 0, end_idx: int = 10000, gpu_id: int = 0):
-    """Main evaluation function.
-    
-    Args:
-        start_idx: Starting index for evaluation range
-        end_idx: Ending index for evaluation range
-        gpu_id: GPU ID to use for this process
-    """
-    # Set GPU for this process
+    #set GPU for this process
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     
     config = EvalDPOConfig()
@@ -445,6 +486,8 @@ def main(start_idx: int = 0, end_idx: int = 10000, gpu_id: int = 0):
     if total > 0:
         print(f"\n[GPU {gpu_id}] Final Accuracy: {len(evaluator.correct) / total * 100:.2f}%")
     print(f"[GPU {gpu_id}] Total Errors: {len(evaluator.errors)}")
+    
+    evaluator.print_benchmark_stats()
 
 
 if __name__ == "__main__":
