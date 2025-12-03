@@ -65,10 +65,10 @@ class Evaluate_Model():
         if self.safe_contains(model_answer, answer) or self.safe_contains(answer, model_answer):
             self.correct.append(sample)
         else:
-            self.correct.append(sample)
+            self.incorrect.append(sample)
 
     def dump_info(self): 
-        output_dir = "outputs/Qwen2.5-VL-r2d/Inference"
+        output_dir = "outputs/Qwen2.5-VL-3B-Instruct/Inference"
         os.makedirs(output_dir, exist_ok=True)
         
         with open(f"{output_dir}/{self.incorrect_json}", 'w') as file:

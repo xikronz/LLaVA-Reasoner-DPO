@@ -80,12 +80,11 @@ class Share4oReasoningDataset(Dataset):
         
         question = sample['question']
         ground_truth = sample['chosen']
-        answer = sample['chosen']
-        
+        answer = sample['answer']
         
         return {
             'id': sample.get('id', idx),
-            'image_path': full_image_path,
+            'image_path': sample['image'],
             'question': question,
             'ground_truth': ground_truth,
             'answer': answer, 
@@ -228,6 +227,7 @@ class ModelEvaluator:
             
             model_response = self.generate_response(inputs)
             ground_truth_answer = item['answer']
+            
             model_answer = extract_answer(model_response)
             
             is_correct = (
@@ -237,10 +237,11 @@ class ModelEvaluator:
             
             result = {
                 'id': item['id'],
+                'image_path': item['image_path'],
                 'question': item['question'],
                 'ground_truth': item['ground_truth'],
                 'model_response': model_response,
-                'ground_truth_answer':ground_truth_answer,
+                'ground_truth_answer': ground_truth_answer,
                 'model_answer': model_answer,
                 'correct': is_correct
             }
@@ -290,6 +291,7 @@ class ModelEvaluator:
                     
                     result = {
                         'id': item['id'],
+                        'image_path': item['image_path'],
                         'question': item['question'],
                         'ground_truth': item['ground_truth'],
                         'model_response': model_response,
