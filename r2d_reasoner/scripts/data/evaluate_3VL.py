@@ -12,52 +12,15 @@ from typing import List, Dict, Any, Optional
 from datasets import load_dataset
 from transformers import AutoProcessor, AutoModelForVision2Seq
 from torch.utils.data import DataLoader, Dataset
+from qwen_vl_utils import process_vision_info
 from data_fortmat import format_messages, format_incorrect_for_training
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from utils import clear_memory
+from utils import clear_memory, extract_answer, safe_contains, resize_image
 from configs.config import EvalConfig, EvalDPOConfig
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 SYSTEM_MESSAGE = "You are a Vision Language Model specialized in interpreting and analyzing visual information from image data. Given an image, provide a detailed explanation based on visual evidence present in the image. Reference specific, visible elements (e.g., signs, people, objects, colors, or positions) to support your reasoning and number your thoughts sequentially. Conclude with the final answer, clearly wrapped in the format: \n\n### Answer: {your answer here}"
-
-def extract_answer(text: str) -> Optional[str]:
-    if text is None:
-        return None
-    
-    #matching "### Answer: X" pattern
-    match = re.search(r"\n\n###\s*Answer:\s*(.*)", text, re.DOTALL | re.IGNORECASE)
-    if match:
-        answer = match.group(1).strip()
-        return answer
-    
-    letter_match = re.search(r'\b([A-D])\.\s', text)
-    if letter_match:
-        return letter_match.group(1)
-    
-    return None
-
-def safe_contains(text: str, substring: str) -> bool:
-    if text is None or substring is None:
-        return False
-    return substring.lower() in text.lower()
-
-
-def resize_image(image: Image.Image, max_size: int) -> Image.Image:
-    width, height = image.size
-    
-    if width <= max_size and height <= max_size:
-        return image
-    
-    if width > height:
-        new_width = max_size
-        new_height = int((height / width) * max_size)
-    else:
-        new_height = max_size
-        new_width = int((width / height) * max_size)
-    
-    return image.resize((new_width, new_height), Image.LANCZOS)
-
 
 class Share4oReasoningDataset(Dataset):    
     def __init__(self, samples: List[Dict], image_path: str, max_image_size: int = 1024):
@@ -68,37 +31,25 @@ class Share4oReasoningDataset(Dataset):
     def __len__(self):
         return len(self.samples)
     
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
+    def __getitem__(self, idx: int):
         sample = self.samples[idx]
         
         full_image_path = os.path.join(self.image_path, sample['image'])
         
-        question = sample['question']
-        ground_truth = sample['chosen']
-        answer = sample['answer']
+        question = sample['conversations'][0]['value']
+        gpt_response = sample['conversations'][1]['value']
         
         return {
             'id': sample.get('id', idx),
-            'image_path': sample['image'],
+            'image_path': full_image_path, 
+            'image_rel_path': sample['image'],  
             'question': question,
-            'ground_truth': ground_truth,
-            'answer': answer, 
+            'gpt_response': gpt_response,
             'sample': sample
         }
 
 
-def collate_fn(batch: List[Dict], processor: AutoProcessor) -> Dict[str, Any]:
-    """
-    Collate function for DataLoader that processes samples for Qwen3-VL.
-    The processor automatically handles image loading from paths via qwen-vl-utils.
-    
-    Args:
-        batch: List of sample dictionaries from the dataset
-        processor: The Qwen3-VL processor
-        
-    Returns:
-        Dictionary containing processed inputs and metadata
-    """
+def collate_fn(batch: List[Dict], processor: AutoProcessor):
     all_messages = []
     metadata = []
     
@@ -108,7 +59,7 @@ def collate_fn(batch: List[Dict], processor: AutoProcessor) -> Dict[str, Any]:
         all_messages.append(messages)
         metadata.append({
             'id': item['id'],
-            'ground_truth': item['ground_truth'],
+            'gpt_response': item['gpt_response'],
             'question': item['question'],
             'image_path': item['image_path']
         })
@@ -158,15 +109,14 @@ class ModelEvaluator:
         os.makedirs(config.output_dir, exist_ok=True)
         os.makedirs(config.inference_output_dir, exist_ok=True)
     
-    def extract_benchmark(self, image_path: str) -> str:
+    def extract_benchmark(self, image_path: str):
         #aokvqa/33DPuC3HsYxY85pCTfcoxv.jpg" -> "aokvqa"
-        parts = image_path.split('/')
-        if len(parts) > 0:
-            return parts[0]
+        path_parts = image_path.split('/')
+        if len(path_parts) > 0:
+            return path_parts[0]
         return "unknown"
     
     def update_benchmark_stats(self, benchmark: str, is_correct: bool):
-        """Update statistics for a specific benchmark."""
         if benchmark not in self.benchmark_stats:
             self.benchmark_stats[benchmark] = {'correct': 0, 'total': 0}
         
@@ -175,7 +125,6 @@ class ModelEvaluator:
             self.benchmark_stats[benchmark]['correct'] += 1
     
     def load_model(self):
-        """Load the model and processor."""
         print(f"Loading model: {self.config.model_id}")
         
         self.processor = AutoProcessor.from_pretrained(
@@ -193,68 +142,49 @@ class ModelEvaluator:
         self.model.eval()
         print("BANGGGGG Model loaded successfully!")
     
-    def generate_response(self, inputs: Dict) -> str:
-        """Generate response from the model."""
-        inputs = {k: v.to(self.model.device) if hasattr(v, 'to') else v 
-                  for k, v in inputs.items()}
-        
-        with torch.no_grad():
-            outputs = self.model.generate(
-                **inputs,
-                max_new_tokens=self.config.max_new_tokens,
-                do_sample=False,  #greedy decoding for evaluation
-                pad_token_id=self.processor.tokenizer.pad_token_id if hasattr(self.processor, 'tokenizer') else None
-            )
-        
-        input_len = inputs['input_ids'].shape[-1]
-        generated_ids = outputs[0][input_len:]
-        response = self.processor.decode(generated_ids, skip_special_tokens=True)
-        
-        return response
-    
-    def evaluate_sample(self, item: Dict, idx: int) -> bool:
-        """
-        Evaluate a single sample.
-        
-        Returns:
-            True if answer is correct, False otherwise
-        """
+    def evaluate_sample(self, item: Dict, idx: int):
         try:
             messages = format_messages(item['image_path'], item['question'])
-            
-            text_input = self.processor.apply_chat_template(
+
+            inputs = self.processor.apply_chat_template(
                 messages,
+                tokenize=True,
                 add_generation_prompt=True,
-                tokenize=False
-            )
+                return_tensors="pt", 
+                return_dict=True
+            ).to(self.model.device)
+
+            generated_ids = self.model.generate(
+                **inputs,
+                )
+
+            generated_ids = generated_ids[:, inputs.input_ids.shape[1]:]
+
+            model_response = self.processor.batch_decode(
+                generated_ids,
+                skip_special_tokens=True
+            )[0]
             
-            inputs = self.processor(
-                text=[text_input],
-                return_tensors="pt"
-            )
-            
-            model_response = self.generate_response(inputs)
-            ground_truth_answer = item['answer']
+            gpt_answer = extract_answer(item['gpt_response'])
             
             model_answer = extract_answer(model_response)
             
             is_correct = (
-                safe_contains(model_answer, ground_truth_answer) or 
-                safe_contains(ground_truth_answer, model_answer)
+                safe_contains(model_answer, gpt_answer) or 
+                safe_contains(gpt_answer, model_answer)
             )
             
-            #extract benchmark from image path
-            benchmark = self.extract_benchmark(item['image_path'])
+            benchmark = self.extract_benchmark(item.get('image_rel_path', item['image_path']))
             self.update_benchmark_stats(benchmark, is_correct)
             
             result = {
                 'id': item['id'],
-                'image_path': item['image_path'],
+                'image_path': item['image_rel_path'],
                 'benchmark': benchmark,
                 'question': item['question'],
-                'ground_truth': item['ground_truth'],
+                'gpt_response': item['gpt_response'],
                 'model_response': model_response,
-                'ground_truth_answer': ground_truth_answer,
+                'gpt_answer': gpt_answer,
                 'model_answer': model_answer,
                 'correct': is_correct
             }
@@ -282,37 +212,46 @@ class ModelEvaluator:
                     
                     messages = format_messages(image, item['question'])
                     
-                    text_input = self.processor.apply_chat_template(
+                    messages = format_messages(item['image_path'], item['question'])
+
+                    inputs = self.processor.apply_chat_template(
                         messages,
+                        tokenize=True,
                         add_generation_prompt=True,
-                        tokenize=False
+                        return_tensors="pt", 
+                        return_dict=True
+                    ).to(self.model.device)
+
+                    generated_ids = self.model.generate(
+                        **inputs,
                     )
+
+                    generated_ids = generated_ids[:, inputs.input_ids.shape[1]:]
+
+                    model_response = self.processor.batch_decode(
+                        generated_ids,
+                        skip_special_tokens=True
+                    )[0]
                     
-                    inputs = self.processor(
-                        text=[text_input],
-                        return_tensors="pt"
-                    )
-                    
-                    model_response = self.generate_response(inputs)
-                    ground_truth_answer = item['answer']
+                    gpt_answer = extract_answer(item['gpt_response'])
                     model_answer = extract_answer(model_response)
                     
                     is_correct = (
-                        safe_contains(model_answer, ground_truth_answer) or 
-                        safe_contains(ground_truth_answer, model_answer)
+                        safe_contains(model_answer, gpt_answer) or 
+                        safe_contains(gpt_answer, model_answer)
                     )
                     
-                    benchmark = self.extract_benchmark(item['image_path'])
+                    benchmark = self.extract_benchmark(item.get('image_rel_path', item['image_path']))
                     self.update_benchmark_stats(benchmark, is_correct)
                     
                     result = {
                         'id': item['id'],
-                        'image_path': item['image_path'],
+                        'image_path': item['image_rel_path'],
                         'benchmark': benchmark,
                         'question': item['question'],
-                        'ground_truth': item['ground_truth'],
+                        'gpt_response': item['gpt_response'],
                         'model_response': model_response,
-                        'ground_truth_answer': ground_truth_answer,
+                        'gpt_answer': gpt_answer,
                         'model_answer': model_answer,
                         'correct': is_correct
                     }
@@ -349,8 +288,12 @@ class ModelEvaluator:
         
         return False
     
+    def log_incorrect(self, prefix: str=""):
+        path = os.path.join(self.config.output_dir, f"{prefix}_incorrect.json") 
+        with open(path, 'w') as f:
+            json.dump(self.incorrect, f, indent=2)
+    
     def save_results(self, prefix: str = ""):
-        """Save evaluation results to JSON files."""
         timestamp = prefix if prefix else "eval"
         
         with open(os.path.join(self.config.output_dir, f"{timestamp}_correct.json"), 'w') as f:
@@ -405,7 +348,6 @@ class ModelEvaluator:
         print(f"Incorrect conversations saved to {output_path} ({len(self.incorrect_conversations)} samples)")
     
     def print_stats(self):
-        """Print current evaluation statistics."""
         total = len(self.correct) + len(self.incorrect)
         if total > 0:
             accuracy = len(self.correct) / total * 100
@@ -413,7 +355,6 @@ class ModelEvaluator:
                   f"Errors: {len(self.errors)}, Accuracy: {accuracy:.2f}%")
     
     def print_benchmark_stats(self):
-        """Print per-benchmark statistics, sorted by accuracy (lowest first)."""
         if not self.benchmark_stats:
             print("No benchmark statistics available yet.")
             return
@@ -437,7 +378,7 @@ def main(start_idx: int = 0, end_idx: int = 10000, gpu_id: int = 0):
     #set GPU for this process
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     
-    config = EvalDPOConfig()
+    config = EvalConfig()
     clear_memory()
     
     print(f"[GPU {gpu_id}] Loading dataset: {config.dataset_name}")
@@ -472,7 +413,7 @@ def main(start_idx: int = 0, end_idx: int = 10000, gpu_id: int = 0):
         
         if (idx + 1) % 500 == 0:
             evaluator.print_stats()
-            evaluator.save_results(prefix=f"gpu{gpu_id}_checkpoint_{idx+1}")
+            evaluator.log_incorrect(prefix=f"gpu{gpu_id}")
             clear_memory()
     
     evaluator.save_results(prefix=f"gpu{gpu_id}_final_{start_idx}_{end_idx}")

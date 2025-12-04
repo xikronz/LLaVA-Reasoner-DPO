@@ -2,7 +2,44 @@ import torch
 import gc
 import time
 import regex as re
+from PIL import Image 
 from qwen_vl_utils import process_vision_info
+
+def extract_answer(text: str):
+    if text is None:
+        return None
+    
+    match = re.search(r"###\s*Answer:\s*(.*)", text, re.DOTALL | re.IGNORECASE)
+
+    if match:
+        return match.group(1).strip()
+        
+    letter_match = re.search(r'\b([A-D])\.\s', text)
+    if letter_match:
+        return letter_match.group(1)
+    
+    return None
+
+def safe_contains(text: str, substring: str):
+    if text is None or substring is None:
+        return False
+    return substring.lower() in text.lower()
+
+
+def resize_image(image: Image.Image, max_size: int):
+    width, height = image.size
+    
+    if width <= max_size and height <= max_size:
+        return image
+    
+    if width > height:
+        new_width = max_size
+        new_height = int((height / width) * max_size)
+    else:
+        new_height = max_size
+        new_width = int((width / height) * max_size)
+    
+    return image.resize((new_width, new_height), Image.LANCZOS)
 
 def generate_text_from_sample(model, processor, sample, max_len, max_new_tokens=1024, device="cuda", resize=False):
     text_input = processor.apply_chat_template(

@@ -40,7 +40,7 @@ class EvalConfig:
     model_id: str = "Qwen/Qwen3-VL-4B-Thinking"
     image_path: str = "data/images"  
     dataset_name: str = "Share4oReasoning/dpo_data"
-    num_samples: int = 10000
+    num_samples: int = 10
     batch_size: int = 1 
     max_new_tokens: int = 1024
     max_image_size: int = 1024  
@@ -54,7 +54,7 @@ class EvalDPOConfig:
     model_id: str = "Qwen/Qwen3-VL-4B-Thinking"
     image_path: str = "data/images"  
     dataset_name: str = "Share4oReasoning/dpo_data"
-    num_samples: int = 10000
+    num_samples: int = 10
     batch_size: int = 1 
     max_new_tokens: int = 1024
     max_image_size: int = 1024 

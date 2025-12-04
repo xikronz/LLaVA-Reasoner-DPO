@@ -6,14 +6,14 @@
 #SBATCH --mem=128G                           # server memory requested in MB (per node)
 #SBATCH -t 72:00:00                           # Time limit (hh:mm:ss)
 #SBATCH --partition=default_partition        # Request partition
-#SBATCH --gres=gpu:nvidia_h100_nvl:2                # Number of GPUs
+#SBATCH --gres=gpu:nvidia_a100_80gb_pcie:2                # Number of GPUs
 
 # Run two processes in parallel, each on a different GPU
 # GPU 0: samples 0-5000
 # GPU 1: samples 5000-10000
 
-python scripts/data/evaluate_3VL.py --start 0 --end 5000 --gpu 0 &
-python scripts/data/evaluate_3VL.py --start 5000 --end 10000 --gpu 1 &
+python scripts/data/evaluate_3VL.py --start 0 --end 5 --gpu 0 &
+python scripts/data/evaluate_3VL.py --start 5 --end 10 --gpu 1 &
 
 # Wait for both processes to complete
 wait

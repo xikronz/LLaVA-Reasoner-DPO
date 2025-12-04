@@ -69,3 +69,5 @@ setup/set_path.sh
 
 
 r2d_reasoner/outputs/*
+*.out 
+r2d_reasoner/scripts/data/default.sh

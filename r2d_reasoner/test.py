@@ -1,0 +1,4 @@
+from utils import extract_answer
+
+e =[{"from": "human", "value": "In which country is this bus located?A. ukB. cubaC. usaD. mexicoGenerate a reason first and then output a letter answer."},{"from": "gpt", "value": "The image shows a red double-decker bus, which is a significant visual clue. Double-decker buses are iconic and commonly associated with the United Kingdom, particularly London.Additionally, the bus has a route number and destinations such a which are place names found in London, UK. The destination 'Gallions Reach' is also a known area in London.Another clue is the roundel symbol visible on the side of the bus, which is a well-known logo of Transport for London (TfL), the local government body responsible for most of the transport system in Greater London.These visual elements strongly suggest that the bus is located in the UK.\n\n### Answer: A. uk"}]
+print(extract_answer(e[1]['value']))

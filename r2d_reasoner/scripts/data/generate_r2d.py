@@ -6,6 +6,27 @@ from openai import OpenAI
 import base64
 import json
 
+RECTIFIED_INSTRUCT = """
+You are a Vision-Language Model specialized in helping students by identifying mistakes in their solutions. 
+You will be given:
+1. An image
+2. A question related to the image
+3. A student's incorrect solution
+4. The correct answer key
+5. The final correct answer
+Your task is to:
+1. **Identify the first mistake** in the student's solution. 
+   - Preface the start of the mistake with <MISTAKE_START> and enclose the end of the mistake with <MISTAKE_END>. 
+   - If the mistake leads to the final answer being wrong, the end of the mistake may be the end of the student's solution.
+   - Only annotate the **first mistake**. Ignore any subsequent errors.
+2. **Provide a correction** for the first mistake.
+   - Reference the answer key and the image as needed.
+   - Explain **why the mistake was wrong**.
+   - Explain **how the student can correct it to reach the correct answer**.
+**Required output format:** \n\n### Annotated student response:<Student response with <MISTAKE_START>...<MISTAKE_END>>
+\n\nCorrection: wait, actually [Why was the mistake wrong? How can the student correct it and reach the correct answer?]
+"""
+
 class Generator:
     def __init__(self):
         self.gemma_key = ""
@@ -68,8 +89,6 @@ def main():
     
     print(data[0])
 
-
-    
 if __name__ == "__main__":
     main()
 
