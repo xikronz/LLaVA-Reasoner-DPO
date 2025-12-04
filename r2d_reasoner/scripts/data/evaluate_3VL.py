@@ -38,6 +38,7 @@ class Share4oReasoningDataset(Dataset):
         
         question = sample['conversations'][0]['value']
         gpt_response = sample['conversations'][1]['value']
+        gpt_answer = extract_answer(gpt_response)
         
         return {
             'id': sample.get('id', idx),
@@ -45,6 +46,7 @@ class Share4oReasoningDataset(Dataset):
             'image_rel_path': sample['image'],  
             'question': question,
             'gpt_response': gpt_response,
+            'gpt_answer': gpt_answer, 
             'sample': sample
         }
 
@@ -60,6 +62,7 @@ def collate_fn(batch: List[Dict], processor: AutoProcessor):
         metadata.append({
             'id': item['id'],
             'gpt_response': item['gpt_response'],
+            'gpt_answer': item['gpt_answer'],
             'question': item['question'],
             'image_path': item['image_path']
         })
@@ -156,6 +159,7 @@ class ModelEvaluator:
 
             generated_ids = self.model.generate(
                 **inputs,
+                max_new_tokens=500
                 )
 
             generated_ids = generated_ids[:, inputs.input_ids.shape[1]:]
@@ -165,7 +169,8 @@ class ModelEvaluator:
                 skip_special_tokens=True
             )[0]
             
-            gpt_answer = extract_answer(item['gpt_response'])
+            gpt_response = item['gpt_response']
+            gpt_answer = item['gpt_answer']
             
             model_answer = extract_answer(model_response)
             
@@ -182,7 +187,7 @@ class ModelEvaluator:
                 'image_path': item['image_rel_path'],
                 'benchmark': benchmark,
                 'question': item['question'],
-                'gpt_response': item['gpt_response'],
+                'gpt_response': gpt_response,
                 'model_response': model_response,
                 'gpt_answer': gpt_answer,
                 'model_answer': model_answer,
@@ -205,15 +210,11 @@ class ModelEvaluator:
                 print(f"Sample {idx}: CUDA OOM, trying smaller resolution...")
                 gc.collect()
                 torch.cuda.empty_cache()
-                
                 try:
                     image = Image.open(item['image_path']).convert('RGB')
                     image = resize_image(image, 512)  
                     
                     messages = format_messages(image, item['question'])
-                    
-                    messages = format_messages(item['image_path'], item['question'])
-
                     inputs = self.processor.apply_chat_template(
                         messages,
                         tokenize=True,
@@ -224,16 +225,16 @@ class ModelEvaluator:
 
                     generated_ids = self.model.generate(
                         **inputs,
+                        max_new_tokens = 500,
                     )
 
                     generated_ids = generated_ids[:, inputs.input_ids.shape[1]:]
-
                     model_response = self.processor.batch_decode(
                         generated_ids,
                         skip_special_tokens=True
                     )[0]
-                    
-                    gpt_answer = extract_answer(item['gpt_response'])
+                    gpt_response = item['gpt_response']
+                    gpt_answer = item['gpt_answer']
                     model_answer = extract_answer(model_response)
                     
                     is_correct = (
@@ -249,7 +250,7 @@ class ModelEvaluator:
                         'image_path': item['image_rel_path'],
                         'benchmark': benchmark,
                         'question': item['question'],
-                        'gpt_response': item['gpt_response'],
+                        'gpt_response': gpt_response,
                         'model_response': model_response,
                         'gpt_answer': gpt_answer,
                         'model_answer': model_answer,
@@ -289,7 +290,7 @@ class ModelEvaluator:
         return False
     
     def log_incorrect(self, prefix: str=""):
-        path = os.path.join(self.config.output_dir, f"{prefix}_incorrect.json") 
+        path = os.path.join(self.config.output_dir, f"{prefix}/incorrect.json") 
         with open(path, 'w') as f:
             json.dump(self.incorrect, f, indent=2)
     
@@ -416,7 +417,7 @@ def main(start_idx: int = 0, end_idx: int = 10000, gpu_id: int = 0):
             evaluator.log_incorrect(prefix=f"gpu{gpu_id}")
             clear_memory()
     
-    evaluator.save_results(prefix=f"gpu{gpu_id}_final_{start_idx}_{end_idx}")
+    evaluator.save_results(prefix=f"gpu{gpu_id}/final_{start_idx}_{end_idx}")
     
     print("\n" + "="*50)
     print(f"[GPU {gpu_id}] FINAL EVALUATION RESULTS")

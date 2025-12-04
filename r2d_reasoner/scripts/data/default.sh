@@ -12,8 +12,8 @@
 # GPU 0: samples 0-5000
 # GPU 1: samples 5000-10000
 
-python scripts/data/evaluate_3VL.py --start 0 --end 5 --gpu 0 &
-python scripts/data/evaluate_3VL.py --start 5 --end 10 --gpu 1 &
+python scripts/data/evaluate_3VL.py --start 0 --end 5000 --gpu 0 &
+python scripts/data/evaluate_3VL.py --start 5000 --end 10000 --gpu 1 &
 
 # Wait for both processes to complete
 wait

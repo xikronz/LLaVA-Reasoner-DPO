@@ -40,10 +40,10 @@ def format_incorrect_for_training(item, model_response: str):
         """
         return {
             "id": item['id'],
-            "image": item['image_path'],
+            "image": item.get('image_rel_path', item.get('image_path', '')),
             "question": item['question'],
-            "gpt_response": item['ground_truth'],  # Full GPT response with reasoning
-            "answer": item['answer'], 
+            "gpt_response": item['gpt_response'],  
+            "answer": item.get('gpt_answer', ''), 
             "conversations": [
                 {
                     "from": "system",
